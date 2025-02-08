@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Display</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .header-section {
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        .file-upload {
+            margin: 20px 0;
+        }
+        #chart-container, #daily-chart-container {
+            margin-top: 40px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let chart;
+        let dailyChart;
+
+        function updateTable(event) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const lines = e.target.result.split('\n');
+                const headers = lines[3].split(',');
+                const meterInfo = lines[7].split(',');
+                const tableBody = document.querySelector('tbody');
+                const headerList = document.querySelector('.header-section ul');
+
+                // Update headers
+                headerList.innerHTML = `
+                    <li>Client Name: ${headers[0].replace(/"/g, '').trim()}</li>
+                    <li>Address: ${headers[1].replace(/"/g, '').trim()}</li>
+                    <li>Meter Code: ${meterInfo[0].replace(/"/g, '').trim()}</li>
+                    <li>Meter Number: ${meterInfo[1].replace(/"/g, '').trim()}</li>
+                `;
+
+                // Clear the existing rows
+                tableBody.innerHTML = '';
+
+                // Prepare data for the charts
+                const monthlyData = {};
+                const dailyData = {};
+
+                // Add new rows and accumulate data
+                for (let i = 12; i < lines.length; i++) {
+                    const row = lines[i].split(',');
+                    if (row.length < 3) continue;
+
+                    const date = row[0].replace(/"/g, '').trim();
+                    const consumption = parseFloat(row[2].replace(/"/g, '').trim());
+
+                    if (!isNaN(consumption)) {
+                        const [day, month, year] = date.split('/');
+                        const monthYear = `${month}/${year}`;
+
+                        monthlyData[monthYear] = (monthlyData[monthYear] || 0) + consumption;
+
+                        if (!dailyData[monthYear]) {
+                            dailyData[monthYear] = {};
+                        }
+
+                        dailyData[monthYear][day] = (dailyData[monthYear][day] || 0) + consumption;
+                    }
+
+                    if (i < 22) { // Display only the first 10 rows
+                        const tableRow = document.createElement('tr');
+
+                        row.forEach(cell => {
+                            const tableCell = document.createElement('td');
+                            tableCell.textContent = cell.replace(/"/g, '').trim();
+                            tableRow.appendChild(tableCell);
+                        });
+
+                        tableBody.appendChild(tableRow);
+                    }
+                }
+
+                // Update the monthly cumulative chart
+                const monthlyLabels = Object.keys(monthlyData);
+                const monthlyValues = Object.values(monthlyData);
+                updateChart(monthlyLabels, monthlyValues);
+
+                // Create dropdown for daily chart
+                const dropdown = document.getElementById('month-selector');
+                dropdown.innerHTML = '';
+                monthlyLabels.forEach(label => {
+                    const option = document.createElement('option');
+                    option.value = label;
+                    option.textContent = label;
+                    dropdown.appendChild(option);
+                });
+
+                // Update the daily chart for the first month
+                updateDailyChart(dailyData, monthlyLabels[0]);
+
+                dropdown.addEventListener('change', () => {
+                    updateDailyChart(dailyData, dropdown.value);
+                });
+            };
+
+            reader.readAsText(file);
+        }
+
+        function updateChart(labels, data) {
+            const ctx = document.getElementById('chart').getContext('2d');
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Monthly Cumulative Consumption (kWh)',
+                        data: data,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Month'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Cumulative Consumption (kWh)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateDailyChart(dailyData, selectedMonth) {
+            const ctx = document.getElementById('daily-chart').getContext('2d');
+
+            if (dailyChart) {
+                dailyChart.destroy();
+            }
+
+            const days = Object.keys(dailyData[selectedMonth] || {}).sort((a, b) => a - b);
+            const values = days.map(day => dailyData[selectedMonth][day]);
+
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: days,
+                    datasets: [{
+                        label: `Daily Total Consumption for ${selectedMonth}`,
+                        data: values,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Day'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Total Consumption (kWh)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="header-section">
+        <h2>Headers</h2>
+        <ul>
+            <li>Client Name: יאיר פרחי</li>
+            <li>Address: א? 16 יואל ירושלים</li>
+            <li>Meter Code: 503</li>
+            <li>Meter Number: 23171355</li>
+        </ul>
+    </div>
+
+    <div class="file-upload">
+        <label for="file-input">Upload Excel CSV File:</label>
+        <input type="file" id="file-input" accept=".csv" onchange="updateTable(event)">
+    </div>
+
+    <h2>First 10 Rows of Data</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>תאריך</th>
+                <th>מועד תחילת הפעימה</th>
+                <th>צריכה בקוט"ש</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>05/11/2023</td>
+                <td>14:30</td>
+                <td>0.608</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>14:45</td>
+                <td>0.426</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>15:00</td>
+                <td>0.405</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>15:15</td>
+                <td>0.498</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>15:30</td>
+                <td>0.493</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>15:45</td>
+                <td>0.544</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>16:00</td>
+                <td>0.482</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>16:15</td>
+                <td>0.586</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>16:30</td>
+                <td>0.477</td>
+            </tr>
+            <tr>
+                <td>05/11/2023</td>
+                <td>16:45</td>
+                <td>0.389</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div id="chart-container">
+        <h2>Monthly Cumulative Consumption</h2>
+        <canvas id="chart"></canvas>
+    </div>
+
+    <div id="daily-chart-container">
+        <h2>Daily Total Consumption</h2>
+        <select id="month-selector"></select>
+        <canvas id="daily-chart"></canvas>
+    </div>
+</body>
+</html>
