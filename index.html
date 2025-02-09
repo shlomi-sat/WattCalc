@@ -1,308 +1,838 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Display</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Electricity Meter Discount Calculator</title>
+  <!-- Include html2pdf.js for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.9.2/html2pdf.bundle.min.js"></script>
+  <!-- Include Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    /* Calculator Intro Section */
+    #calculator-intro {
+      margin-bottom: 30px;
+      padding: 15px;
+      border: 2px solid #007bff;
+      background-color: #e9f5ff;
+    }
+    #calculator-intro h1 {
+      margin-top: 0;
+      color: #007bff;
+    }
+    #calculator-intro p {
+      line-height: 1.6;
+    }
+    #calculator-intro ol {
+      margin: 10px 0 0 20px;
+      line-height: 1.6;
+    }
+    /* File upload at the very top */
+    .file-upload {
+      margin-bottom: 20px;
+    }
+    /* Data Summary styling */
+    #data-summary {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      background-color: #f9f9f9;
+    }
+    /* First 10 Rows Table styling */
+    #preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    #preview-table th,
+    #preview-table td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+    }
+    #preview-table th {
+      background-color: #f4f4f4;
+    }
+    /* Containers for charts */
+    #chart-container,
+    #daily-chart-container,
+    #average-day-chart-container,
+    #seasonal-avg-chart-container,
+    #all-months-chart-container,
+    #annual-chart-container {
+      margin-top: 40px;
+    }
+    .metric-selector {
+      margin-bottom: 10px;
+    }
+    .discount-inputs div {
+      margin-bottom: 10px;
+    }
+    /* Styles for annual discount sections */
+    .discount-section {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #aaa;
+      background-color: #f0f0f0;
+    }
+    .discount-option {
+      margin-bottom: 20px;
+    }
+    .discount-option h3 {
+      margin-bottom: 10px;
+    }
+    /* Style for the Export PDF button */
+    #export-pdf-btn {
+      margin-top: 40px;
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+  </style>
+  <script>
+    // Global aggregated data variables
+    let globalMonthlyData, globalDailyData, globalAvgDayData;
+    let chart, dailyChart, avgDayChart, seasonalAvgChart, allMonthsChart;
+    // Global annual aggregated data for discount overlay
+    window.globalAnnualData = null;
+
+    // Helper function: compute metric from an array of numbers.
+    function computeMetric(values, metric) {
+      if (!values || values.length === 0) return 0;
+      let sorted = values.slice().sort((a, b) => a - b);
+      if (metric === "total") {
+        return sorted.reduce((acc, val) => acc + val, 0);
+      } else if (metric === "average") {
+        return sorted.reduce((acc, val) => acc + val, 0) / sorted.length;
+      } else if (metric === "median" || metric === "cep50") {
+        let n = sorted.length;
+        if (n % 2 === 0) {
+          return (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+        } else {
+          return sorted[Math.floor(n / 2)];
         }
-        .header-section {
-            margin-bottom: 20px;
+      } else if (metric === "cep90") {
+        let index = Math.floor(0.9 * sorted.length);
+        if (index >= sorted.length) index = sorted.length - 1;
+        return sorted[index];
+      }
+      return 0;
+    }
+
+    // Update Data Summary with header info and aggregated monthly data.
+    function updateSummary(monthlyData, headerInfo) {
+      let totalConsumption = 0;
+      let maxMonth = "";
+      let maxVal = -Infinity;
+      let minMonth = "";
+      let minVal = Infinity;
+      for (let month in monthlyData) {
+        totalConsumption += monthlyData[month].sum;
+        if (monthlyData[month].sum > maxVal) {
+          maxVal = monthlyData[month].sum;
+          maxMonth = month;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
+        if (monthlyData[month].sum < minVal) {
+          minVal = monthlyData[month].sum;
+          minMonth = month;
         }
-        th, td {
-            border: 1px solid #ccc;
-            padding: 10px;
-            text-align: left;
+      }
+      const summaryDiv = document.getElementById("data-summary");
+      summaryDiv.innerHTML = `
+        <h2>Data Summary</h2>
+        <p><strong>Client Name:</strong> ${headerInfo.clientName}</p>
+        <p><strong>Address:</strong> ${headerInfo.address}</p>
+        <p><strong>Meter Code:</strong> ${headerInfo.meterCode}</p>
+        <p><strong>Meter Number:</strong> ${headerInfo.meterNumber}</p>
+        <p><strong>Total Year Consumption:</strong> ${totalConsumption.toFixed(2)} kWh</p>
+        <p><strong>Month with Highest Consumption:</strong> ${maxMonth} (${maxVal.toFixed(2)} kWh)</p>
+        <p><strong>Month with Lowest Consumption:</strong> ${minMonth} (${minVal.toFixed(2)} kWh)</p>
+      `;
+    }
+
+    // Monthly Cumulative Consumption Chart (Total only)
+    function updateMonthlyChart(monthlyData) {
+      const labels = Object.keys(monthlyData);
+      const computedValues = labels.map(label =>
+        computeMetric(monthlyData[label].values, "total")
+      );
+      const ctx = document.getElementById("chart").getContext("2d");
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "Monthly Cumulative Consumption (Total)",
+            data: computedValues,
+            backgroundColor: "rgba(54, 162, 235, 0.5)",
+            borderColor: "rgba(54, 162, 235, 1)",
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Month" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
         }
-        th {
-            background-color: #f4f4f4;
+      });
+    }
+
+    // Daily Total Consumption Chart (Total only)
+    function updateDailyChart(dailyData, selectedMonth) {
+      const monthData = dailyData[selectedMonth] || {};
+      const days = Object.keys(monthData).sort((a, b) => a - b);
+      const computedValues = days.map(day =>
+        computeMetric(monthData[day].values, "total")
+      );
+      const ctx = document.getElementById("daily-chart").getContext("2d");
+      if (dailyChart) dailyChart.destroy();
+      dailyChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: days,
+          datasets: [{
+            label: `Daily Total Consumption for ${selectedMonth} (Total)`,
+            data: computedValues,
+            borderColor: "rgba(75, 192, 192, 1)",
+            backgroundColor: "rgba(75, 192, 192, 0.2)",
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Day" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
         }
-        .file-upload {
-            margin: 20px 0;
+      });
+    }
+
+    // Average Day Consumption Chart for Selected Month (selectable metric)
+    function updateAvgDayChart(avgDayData, selectedMonth) {
+      const metric = document.getElementById("avg-day-metric-selector").value;
+      const monthData = avgDayData[selectedMonth] || {};
+      const timeSlots = Object.keys(monthData).sort((a, b) => a.localeCompare(b));
+      const computedValues = timeSlots.map(slot =>
+        computeMetric(monthData[slot].values, metric)
+      );
+      const ctx = document.getElementById("average-day-chart").getContext("2d");
+      if (avgDayChart) avgDayChart.destroy();
+      avgDayChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: timeSlots,
+          datasets: [{
+            label: `Average Day Consumption for ${selectedMonth} (${metric})`,
+            data: computedValues,
+            borderColor: "rgba(255, 99, 132, 1)",
+            backgroundColor: "rgba(255, 99, 132, 0.2)",
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Time" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
         }
-        #chart-container, #daily-chart-container {
-            margin-top: 40px;
+      });
+    }
+
+    // Seasonal Average Day Consumption Chart (selectable metric)
+    function updateSeasonalAvgChart(avgDayData) {
+      const metric = document.getElementById("seasonal-metric-selector").value;
+      const winterData = {};
+      const summerData = {};
+      for (let monthYear in avgDayData) {
+        const parts = monthYear.split("/");
+        let month = parseInt(parts[0], 10);
+        if (month === 12 || month === 1 || month === 2) {
+          for (let timeSlot in avgDayData[monthYear]) {
+            if (!winterData[timeSlot])
+              winterData[timeSlot] = { values: [] };
+            winterData[timeSlot].values = winterData[timeSlot].values.concat(avgDayData[monthYear][timeSlot].values);
+          }
+        } else if (month === 6 || month === 7 || month === 8) {
+          for (let timeSlot in avgDayData[monthYear]) {
+            if (!summerData[timeSlot])
+              summerData[timeSlot] = { values: [] };
+            summerData[timeSlot].values = summerData[timeSlot].values.concat(avgDayData[monthYear][timeSlot].values);
+          }
         }
-    </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-        let chart;
-        let dailyChart;
-
-        function updateTable(event) {
-            const file = event.target.files[0];
-            const reader = new FileReader();
-
-            reader.onload = function(e) {
-                const lines = e.target.result.split('\n');
-                const headers = lines[3].split(',');
-                const meterInfo = lines[7].split(',');
-                const tableBody = document.querySelector('tbody');
-                const headerList = document.querySelector('.header-section ul');
-
-                // Update headers
-                headerList.innerHTML = `
-                    <li>Client Name: ${headers[0].replace(/"/g, '').trim()}</li>
-                    <li>Address: ${headers[1].replace(/"/g, '').trim()}</li>
-                    <li>Meter Code: ${meterInfo[0].replace(/"/g, '').trim()}</li>
-                    <li>Meter Number: ${meterInfo[1].replace(/"/g, '').trim()}</li>
-                `;
-
-                // Clear the existing rows
-                tableBody.innerHTML = '';
-
-                // Prepare data for the charts
-                const monthlyData = {};
-                const dailyData = {};
-
-                // Add new rows and accumulate data
-                for (let i = 12; i < lines.length; i++) {
-                    const row = lines[i].split(',');
-                    if (row.length < 3) continue;
-
-                    const date = row[0].replace(/"/g, '').trim();
-                    const consumption = parseFloat(row[2].replace(/"/g, '').trim());
-
-                    if (!isNaN(consumption)) {
-                        const [day, month, year] = date.split('/');
-                        const monthYear = `${month}/${year}`;
-
-                        monthlyData[monthYear] = (monthlyData[monthYear] || 0) + consumption;
-
-                        if (!dailyData[monthYear]) {
-                            dailyData[monthYear] = {};
-                        }
-
-                        dailyData[monthYear][day] = (dailyData[monthYear][day] || 0) + consumption;
-                    }
-
-                    if (i < 22) { // Display only the first 10 rows
-                        const tableRow = document.createElement('tr');
-
-                        row.forEach(cell => {
-                            const tableCell = document.createElement('td');
-                            tableCell.textContent = cell.replace(/"/g, '').trim();
-                            tableRow.appendChild(tableCell);
-                        });
-
-                        tableBody.appendChild(tableRow);
-                    }
-                }
-
-                // Update the monthly cumulative chart
-                const monthlyLabels = Object.keys(monthlyData);
-                const monthlyValues = Object.values(monthlyData);
-                updateChart(monthlyLabels, monthlyValues);
-
-                // Create dropdown for daily chart
-                const dropdown = document.getElementById('month-selector');
-                dropdown.innerHTML = '';
-                monthlyLabels.forEach(label => {
-                    const option = document.createElement('option');
-                    option.value = label;
-                    option.textContent = label;
-                    dropdown.appendChild(option);
-                });
-
-                // Update the daily chart for the first month
-                updateDailyChart(dailyData, monthlyLabels[0]);
-
-                dropdown.addEventListener('change', () => {
-                    updateDailyChart(dailyData, dropdown.value);
-                });
-            };
-
-            reader.readAsText(file);
-        }
-
-        function updateChart(labels, data) {
-            const ctx = document.getElementById('chart').getContext('2d');
-
-            if (chart) {
-                chart.destroy();
+      }
+      const timeSlotSet = new Set([...Object.keys(winterData), ...Object.keys(summerData)]);
+      const timeSlots = Array.from(timeSlotSet).sort((a, b) => a.localeCompare(b));
+      const winterComputed = timeSlots.map(slot =>
+        winterData[slot] ? computeMetric(winterData[slot].values, metric) : null
+      );
+      const summerComputed = timeSlots.map(slot =>
+        summerData[slot] ? computeMetric(summerData[slot].values, metric) : null
+      );
+      const ctx = document.getElementById("seasonal-avg-chart").getContext("2d");
+      if (seasonalAvgChart) seasonalAvgChart.destroy();
+      seasonalAvgChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: timeSlots,
+          datasets: [
+            {
+              label: `Winter Average (${metric})`,
+              data: winterComputed,
+              borderColor: "rgba(54, 162, 235, 1)",
+              backgroundColor: "rgba(54, 162, 235, 0.2)",
+              fill: true
+            },
+            {
+              label: `Summer Average (${metric})`,
+              data: summerComputed,
+              borderColor: "rgba(255, 206, 86, 1)",
+              backgroundColor: "rgba(255, 206, 86, 0.2)",
+              fill: true
             }
-
-            chart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Monthly Cumulative Consumption (kWh)',
-                        data: data,
-                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: true
-                        }
-                    },
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Month'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Cumulative Consumption (kWh)'
-                            }
-                        }
-                    }
-                }
-            });
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Time" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
         }
+      });
+    }
 
-        function updateDailyChart(dailyData, selectedMonth) {
-            const ctx = document.getElementById('daily-chart').getContext('2d');
+    // All Months Average Day Consumption Chart (selectable metric)
+    function updateAllMonthsChart(avgDayData) {
+      const metric = document.getElementById("all-months-metric-selector").value;
+      const allMonthsData = {};
+      for (let monthYear in avgDayData) {
+        const parts = monthYear.split("/");
+        let month = parseInt(parts[0], 10);
+        if (!allMonthsData[month]) allMonthsData[month] = {};
+        for (let timeSlot in avgDayData[monthYear]) {
+          if (!allMonthsData[month][timeSlot])
+            allMonthsData[month][timeSlot] = { values: [] };
+          allMonthsData[month][timeSlot].values = allMonthsData[month][timeSlot].values.concat(avgDayData[monthYear][timeSlot].values);
+        }
+      }
+      let timeSlotSet = new Set();
+      for (let m in allMonthsData) {
+        for (let timeSlot in allMonthsData[m]) {
+          timeSlotSet.add(timeSlot);
+        }
+      }
+      let timeSlots = Array.from(timeSlotSet).sort((a, b) => a.localeCompare(b));
+      const monthNames = ["January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"];
+      const colors = [
+        "rgba(255, 99, 132, 1)",
+        "rgba(54, 162, 235, 1)",
+        "rgba(255, 206, 86, 1)",
+        "rgba(75, 192, 192, 1)",
+        "rgba(153, 102, 255, 1)",
+        "rgba(255, 159, 64, 1)",
+        "rgba(199, 199, 199, 1)",
+        "rgba(83, 102, 255, 1)",
+        "rgba(255, 102, 255, 1)",
+        "rgba(102, 255, 102, 1)",
+        "rgba(102, 204, 255, 1)",
+        "rgba(204, 102, 255, 1)"
+      ];
+      let datasets = [];
+      for (let m = 1; m <= 12; m++) {
+        if (allMonthsData[m]) {
+          let data = timeSlots.map(slot =>
+            computeMetric(allMonthsData[m][slot] ? allMonthsData[m][slot].values : [], metric)
+          );
+          datasets.push({
+            label: monthNames[m - 1],
+            data: data,
+            borderColor: colors[m - 1],
+            backgroundColor: colors[m - 1].replace("1)", "0.2)"),
+            fill: false
+          });
+        }
+      }
+      const ctx = document.getElementById("all-months-chart").getContext("2d");
+      if (allMonthsChart) allMonthsChart.destroy();
+      allMonthsChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: timeSlots,
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Time" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
+        }
+      });
+    }
 
-            if (dailyChart) {
-                dailyChart.destroy();
+    // Annual Average Day Consumption Chart with Dual Discount Overlays for Option A and Option B.
+    // Option A: Three intervals with defaults: Range1A: default 0%, Range2A: default 25%, Range3A: default 0%.
+    // Option B: Three intervals with defaults: all 7%.
+    function updateAnnualChartOverlay() {
+      let annualData = {};
+      for (let monthYear in globalAvgDayData) {
+        for (let timeSlot in globalAvgDayData[monthYear]) {
+          if (!annualData[timeSlot]) {
+            annualData[timeSlot] = 0;
+          }
+          annualData[timeSlot] += globalAvgDayData[monthYear][timeSlot].sum;
+        }
+      }
+      let timeSlots = Object.keys(annualData).sort((a, b) => a.localeCompare(b));
+      let totals = timeSlots.map(slot => annualData[slot]);
+      window.globalAnnualData = { timeSlots, totals };
+
+      // Option A calculations (using Option A inputs)
+      let r1A_end = document.getElementById("range1A-end").value;
+      let d1A = parseFloat(document.getElementById("range1A-discount").value) || 0;
+      let r2A_end = document.getElementById("range2A-end").value;
+      let d2A = parseFloat(document.getElementById("range2A-discount").value) || 0;
+      let r3A_end = document.getElementById("range3A-end").value;
+      let d3A = parseFloat(document.getElementById("range3A-discount").value) || 0;
+      
+      let discountedTotalsA = totals.map((value, index) => {
+        let time = timeSlots[index];
+        if (time <= r1A_end) {
+          return value * (1 - d1A / 100);
+        } else if (time > r1A_end && time <= r2A_end) {
+          return value * (1 - d2A / 100);
+        } else if (time > r2A_end && time <= r3A_end) {
+          return value * (1 - d3A / 100);
+        } else {
+          return value;
+        }
+      });
+
+      // Option B calculations (using Option B inputs)
+      let r1B_end = document.getElementById("range1B-end").value;
+      let d1B = parseFloat(document.getElementById("range1B-discount").value) || 0;
+      let r2B_end = document.getElementById("range2B-end").value;
+      let d2B = parseFloat(document.getElementById("range2B-discount").value) || 0;
+      let r3B_end = document.getElementById("range3B-end").value;
+      let d3B = parseFloat(document.getElementById("range3B-discount").value) || 0;
+      
+      let discountedTotalsB = totals.map((value, index) => {
+        let time = timeSlots[index];
+        if (time <= r1B_end) {
+          return value * (1 - d1B / 100);
+        } else if (time > r1B_end && time <= r2B_end) {
+          return value * (1 - d2B / 100);
+        } else if (time > r2B_end && time <= r3B_end) {
+          return value * (1 - d3B / 100);
+        } else {
+          return value;
+        }
+      });
+
+      const ctx = document.getElementById("annual-avg-day-chart").getContext("2d");
+      if (window.annualChart) window.annualChart.destroy();
+      window.annualChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: timeSlots,
+          datasets: [
+            {
+              label: "Original Annual Consumption",
+              data: totals,
+              borderColor: "rgba(0, 123, 255, 1)",
+              backgroundColor: "rgba(0, 123, 255, 0.2)",
+              fill: true
+            },
+            {
+              label: "Option A Discounted",
+              data: discountedTotalsA,
+              borderColor: "rgba(40, 167, 69, 1)",
+              backgroundColor: "rgba(40, 167, 69, 0.2)",
+              fill: true
+            },
+            {
+              label: "Option B Discounted",
+              data: discountedTotalsB,
+              borderColor: "rgba(220, 53, 69, 1)",
+              backgroundColor: "rgba(220, 53, 69, 0.2)",
+              fill: true
             }
-
-            const days = Object.keys(dailyData[selectedMonth] || {}).sort((a, b) => a - b);
-            const values = days.map(day => dailyData[selectedMonth][day]);
-
-            dailyChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: days,
-                    datasets: [{
-                        label: `Daily Total Consumption for ${selectedMonth}`,
-                        data: values,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: true
-                        }
-                    },
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Day'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Total Consumption (kWh)'
-                            }
-                        }
-                    }
-                }
-            });
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { title: { display: true, text: "Time" } },
+            y: { title: { display: true, text: "Consumption (kWh)" } }
+          }
         }
-    </script>
+      });
+
+      let originalTotal = totals.reduce((acc, val) => acc + val, 0);
+      let totalA = discountedTotalsA.reduce((acc, val) => acc + val, 0);
+      let totalB = discountedTotalsB.reduce((acc, val) => acc + val, 0);
+      let savingsA = originalTotal - totalA;
+      let savingsB = originalTotal - totalB;
+      let diff = Math.abs(savingsA - savingsB);
+      let recommendation = "";
+      if (savingsA > savingsB) {
+        recommendation = "Option A is recommended as it yields higher savings.";
+      } else if (savingsB > savingsA) {
+        recommendation = "Option B is recommended as it yields higher savings.";
+      } else {
+        recommendation = "Both options yield the same savings.";
+      }
+      let summaryText = "<br><br>Option A Annual Savings: " + savingsA.toFixed(2) + " kWh<br><br>" +
+                        "Option B Annual Savings: " + savingsB.toFixed(2) + " kWh<br><br>" +
+                        "Difference: " + diff.toFixed(2) + " kWh<br><br>" +
+                        recommendation + "<br><br>" +
+                        "Join our Facebook group for more tips, tools, and insights! " +
+                        '<a href="https://www.facebook.com/share/g/14QKMyzSQv/" target="_blank">' +
+                        '<img src="https://upload.wikimedia.org/wikipedia/commons/5/51/Facebook_f_logo_%282019%29.svg" alt="Facebook" style="width:24px;height:24px;"></a>';
+      document.getElementById("annual-savings").innerHTML = summaryText;
+    }
+
+    // Main function: Process CSV file and update charts and summary.
+    function updateTable(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const lines = e.target.result.split("\n");
+        const headers = lines[3].split(",");
+        const meterInfo = lines[7].split(",");
+        const tableBody = document.querySelector("tbody");
+        const headerInfo = {
+          clientName: headers[0].replace(/"/g, "").trim(),
+          address: headers[1].replace(/"/g, "").trim(),
+          meterCode: meterInfo[0].replace(/"/g, "").trim(),
+          meterNumber: meterInfo[1].replace(/"/g, "").trim()
+        };
+        tableBody.innerHTML = "";
+        const monthlyData = {};
+        const dailyData = {};
+        const avgDayData = {};
+        // Reintroduce the First 10 Rows of Data preview:
+        let previewHTML = "";
+        let rowCount = 0;
+        for (let i = 12; i < lines.length; i++) {
+          const row = lines[i].split(",");
+          if (row.length < 3) continue;
+          if (rowCount < 10) {
+            previewHTML += "<tr>";
+            row.forEach((cell) => {
+              previewHTML += "<td>" + cell.replace(/"/g, "").trim() + "</td>";
+            });
+            previewHTML += "</tr>";
+            rowCount++;
+          }
+          const date = row[0].replace(/"/g, "").trim();
+          const consumption = parseFloat(row[2].replace(/"/g, "").trim());
+          if (!isNaN(consumption)) {
+            const [day, month, year] = date.split("/");
+            const monthYear = `${month}/${year}`;
+            const timeSlot = row[1].replace(/"/g, "").trim();
+            if (!monthlyData[monthYear])
+              monthlyData[monthYear] = { sum: 0, count: 0, values: [] };
+            monthlyData[monthYear].sum += consumption;
+            monthlyData[monthYear].count += 1;
+            monthlyData[monthYear].values.push(consumption);
+            if (!dailyData[monthYear]) dailyData[monthYear] = {};
+            if (!dailyData[monthYear][day])
+              dailyData[monthYear][day] = { sum: 0, count: 0, values: [] };
+            dailyData[monthYear][day].sum += consumption;
+            dailyData[monthYear][day].count += 1;
+            dailyData[monthYear][day].values.push(consumption);
+            if (!avgDayData[monthYear]) avgDayData[monthYear] = {};
+            if (!avgDayData[monthYear][timeSlot])
+              avgDayData[monthYear][timeSlot] = { sum: 0, count: 0, values: [] };
+            avgDayData[monthYear][timeSlot].sum += consumption;
+            avgDayData[monthYear][timeSlot].count += 1;
+            avgDayData[monthYear][timeSlot].values.push(consumption);
+          }
+        }
+        // Populate the preview table's tbody with the first 10 rows.
+        document.getElementById("preview-tbody").innerHTML = previewHTML;
+        updateSummary(monthlyData, headerInfo);
+        globalMonthlyData = monthlyData;
+        globalDailyData = dailyData;
+        globalAvgDayData = avgDayData;
+        const monthSelector = document.getElementById("month-selector");
+        monthSelector.innerHTML = "";
+        const avgDayMonthSelector = document.getElementById("average-day-month-selector");
+        avgDayMonthSelector.innerHTML = "";
+        const monthLabels = Object.keys(monthlyData);
+        monthLabels.forEach((label) => {
+          const option1 = document.createElement("option");
+          option1.value = label;
+          option1.textContent = label;
+          monthSelector.appendChild(option1);
+          const option2 = document.createElement("option");
+          option2.value = label;
+          option2.textContent = label;
+          avgDayMonthSelector.appendChild(option2);
+        });
+        updateMonthlyChart(monthlyData);
+        updateDailyChart(dailyData, monthLabels[0]);
+        updateAvgDayChart(avgDayData, monthLabels[0]);
+        updateSeasonalAvgChart(avgDayData);
+        updateAllMonthsChart(avgDayData);
+        updateAnnualChartOverlay();
+        document.getElementById("avg-day-metric-selector").addEventListener("change", () => {
+          let selectedMonth = document.getElementById("average-day-month-selector").value;
+          updateAvgDayChart(avgDayData, selectedMonth);
+        });
+        document.getElementById("seasonal-metric-selector").addEventListener("change", () => {
+          updateSeasonalAvgChart(avgDayData);
+        });
+        document.getElementById("all-months-metric-selector").addEventListener("change", () => {
+          updateAllMonthsChart(avgDayData);
+        });
+        document.getElementById("month-selector").addEventListener("change", (e) => {
+          updateDailyChart(dailyData, e.target.value);
+        });
+        document.getElementById("average-day-month-selector").addEventListener("change", (e) => {
+          updateAvgDayChart(avgDayData, e.target.value);
+        });
+      };
+      reader.readAsText(file);
+    }
+
+    // Set up Option A and Option B discount input behavior after DOM loads.
+    window.addEventListener("DOMContentLoaded", function() {
+      document.getElementById("range1A-end").addEventListener("change", function() {
+        document.getElementById("range2A-start").value = this.value;
+      });
+      document.getElementById("range2A-end").addEventListener("change", function() {
+        document.getElementById("range3A-start").value = this.value;
+      });
+      document.getElementById("range1B-end").addEventListener("change", function() {
+        document.getElementById("range2B-start").value = this.value;
+      });
+      document.getElementById("range2B-end").addEventListener("change", function() {
+        document.getElementById("range3B-start").value = this.value;
+      });
+    });
+
+    // Export the entire webpage to a PDF with landscape orientation.
+    function exportToPDF() {
+      const element = document.body;
+      const opt = {
+        margin: 0.5,
+        filename: 'data_display.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape' }
+      };
+      html2pdf().set(opt).from(element).save();
+    }
+  </script>
 </head>
 <body>
-    <div class="header-section">
-        <h2>Headers</h2>
-        <ul>
-            <li>Client Name: יאיר פרחי</li>
-            <li>Address: א? 16 יואל ירושלים</li>
-            <li>Meter Code: 503</li>
-            <li>Meter Number: 23171355</li>
-        </ul>
-    </div>
+  <!-- Calculator Title and Instructions -->
+  <div id="calculator-intro">
+    <h1>Smart Electricity Meter Discount Calculator</h1>
+    <p>This calculator is designed exclusively for users with a smart electricity meter. You can download your personal consumption file (in CSV format) from the Electric Company's website. Only users with a smart meter have access to this file.</p>
+    <p><strong>How to download your personal file:</strong></p>
+    <ol>
+      <li>Visit the Electric Company's website and log into your personal account.</li>
+      <li>Navigate to the smart meter data section and download your consumption file (CSV format).</li>
+      <li>Save the file to your computer.</li>
+    </ol>
+    <p><strong>How to use the calculator:</strong></p>
+    <ol>
+      <li>Upload your downloaded CSV file using the file upload button below.</li>
+      <li>The calculator will process your data and display various charts comparing different discount proposals.</li>
+      <li>Review the displayed discount scenarios (Option A and Option B) to see which one yields greater savings.</li>
+      <li>You can export the entire page to a PDF (in landscape orientation) by clicking the "Export to PDF" button at the bottom.</li>
+    </ol>
+  </div>
 
-    <div class="file-upload">
-        <label for="file-input">Upload Excel CSV File:</label>
-        <input type="file" id="file-input" accept=".csv" onchange="updateTable(event)">
-    </div>
+  <!-- File Upload (at the very top) -->
+  <div class="file-upload">
+    <label for="file-input">Upload Excel CSV File:</label>
+    <input type="file" id="file-input" accept=".csv" onchange="updateTable(event)" />
+  </div>
 
-    <h2>First 10 Rows of Data</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>תאריך</th>
-                <th>מועד תחילת הפעימה</th>
-                <th>צריכה בקוט"ש</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td>05/11/2023</td>
-                <td>14:30</td>
-                <td>0.608</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>14:45</td>
-                <td>0.426</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>15:00</td>
-                <td>0.405</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>15:15</td>
-                <td>0.498</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>15:30</td>
-                <td>0.493</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>15:45</td>
-                <td>0.544</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>16:00</td>
-                <td>0.482</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>16:15</td>
-                <td>0.586</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>16:30</td>
-                <td>0.477</td>
-            </tr>
-            <tr>
-                <td>05/11/2023</td>
-                <td>16:45</td>
-                <td>0.389</td>
-            </tr>
-        </tbody>
-    </table>
+  <!-- Data Summary (includes header info) -->
+  <div id="data-summary"></div>
 
-    <div id="chart-container">
-        <h2>Monthly Cumulative Consumption</h2>
-        <canvas id="chart"></canvas>
-    </div>
+  <!-- First 10 Rows of Data Preview -->
+  <h2>First 10 Rows of Data</h2>
+  <table id="preview-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Start Time</th>
+        <th>Consumption (kWh)</th>
+      </tr>
+    </thead>
+    <tbody id="preview-tbody">
+      <!-- First 10 rows will be inserted here by the script -->
+    </tbody>
+  </table>
 
-    <div id="daily-chart-container">
-        <h2>Daily Total Consumption</h2>
-        <select id="month-selector"></select>
-        <canvas id="daily-chart"></canvas>
+  <!-- Monthly Cumulative Consumption Chart (Total only) -->
+  <div id="chart-container">
+    <h2>Monthly Cumulative Consumption</h2>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <!-- Daily Total Consumption Chart (Total only) -->
+  <div id="daily-chart-container">
+    <h2>Daily Total Consumption</h2>
+    <div>
+      <label for="month-selector">Select Month: </label>
+      <select id="month-selector"></select>
     </div>
+    <canvas id="daily-chart"></canvas>
+  </div>
+
+  <!-- Average Day Consumption for Selected Month -->
+  <div id="average-day-chart-container">
+    <h2>Average Day Consumption</h2>
+    <div>
+      <label for="average-day-month-selector">Select Month: </label>
+      <select id="average-day-month-selector"></select>
+    </div>
+    <div class="metric-selector">
+      <label for="avg-day-metric-selector">Select Metric: </label>
+      <select id="avg-day-metric-selector">
+        <option value="average">Average</option>
+        <option value="median">Median</option>
+        <option value="cep90">CEP90</option>
+        <option value="cep50">CEP50</option>
+        <option value="total" selected>Total</option>
+      </select>
+    </div>
+    <canvas id="average-day-chart"></canvas>
+  </div>
+
+  <!-- Seasonal Average Day Consumption Chart -->
+  <div id="seasonal-avg-chart-container">
+    <h2>Average Day Consumption by Season</h2>
+    <div class="metric-selector">
+      <label for="seasonal-metric-selector">Select Metric: </label>
+      <select id="seasonal-metric-selector">
+        <option value="average">Average</option>
+        <option value="median">Median</option>
+        <option value="cep90">CEP90</option>
+        <option value="cep50">CEP50</option>
+        <option value="total" selected>Total</option>
+      </select>
+    </div>
+    <canvas id="seasonal-avg-chart"></canvas>
+  </div>
+
+  <!-- All Months Average Day Consumption Chart -->
+  <div id="all-months-chart-container">
+    <h2>Average Day Consumption for All Months</h2>
+    <div class="metric-selector">
+      <label for="all-months-metric-selector">Select Metric: </label>
+      <select id="all-months-metric-selector">
+        <option value="average">Average</option>
+        <option value="median">Median</option>
+        <option value="cep90">CEP90</option>
+        <option value="cep50">CEP50</option>
+        <option value="total" selected>Total</option>
+      </select>
+    </div>
+    <canvas id="all-months-chart"></canvas>
+  </div>
+
+  <!-- Annual Average Day Consumption with Dual Discount Overlays -->
+  <div id="annual-chart-container">
+    <h2>Annual Average Day Consumption</h2>
+    <!-- Discount controls and annual savings summary placed above the chart -->
+    <div class="discount-section">
+      <!-- Option A: Customizable Discount Scenario (Fixed) -->
+      <div class="discount-option option-a">
+        <h3>Discount Scenario A (Fixed)</h3>
+        <div class="discount-inputs">
+          <!-- Row 1 for Option A -->
+          <div>
+            <label for="range1A-start">Range 1 Start Time: </label>
+            <input type="time" id="range1A-start" step="900" value="00:00" disabled>
+            <label for="range1A-end">End Time: </label>
+            <input type="time" id="range1A-end" step="900" value="18:00">
+            <label for="range1A-discount">Discount (%): </label>
+            <input type="number" id="range1A-discount" value="0">
+          </div>
+          <!-- Row 2 for Option A -->
+          <div>
+            <label for="range2A-start">Range 2 Start Time: </label>
+            <input type="time" id="range2A-start" step="900" value="18:00" disabled>
+            <label for="range2A-end">End Time: </label>
+            <input type="time" id="range2A-end" step="900" value="22:00">
+            <label for="range2A-discount">Discount (%): </label>
+            <input type="number" id="range2A-discount" value="25">
+          </div>
+          <!-- Row 3 for Option A -->
+          <div>
+            <label for="range3A-start">Range 3 Start Time: </label>
+            <input type="time" id="range3A-start" step="900" value="22:00" disabled>
+            <label for="range3A-end">End Time: </label>
+            <input type="time" id="range3A-end" step="900" value="23:45" disabled>
+            <label for="range3A-discount">Discount (%): </label>
+            <input type="number" id="range3A-discount" value="0">
+          </div>
+        </div>
+      </div>
+      <!-- Option B: Customizable Discount Scenario -->
+      <div class="discount-option option-b">
+        <h3>Discount Scenario B (Customizable)</h3>
+        <div class="discount-inputs">
+          <!-- Row 1 for Option B -->
+          <div>
+            <label for="range1B-start">Range 1 Start Time: </label>
+            <input type="time" id="range1B-start" step="900" value="00:00" disabled>
+            <label for="range1B-end">End Time: </label>
+            <input type="time" id="range1B-end" step="900" value="08:00">
+            <label for="range1B-discount">Discount (%): </label>
+            <input type="number" id="range1B-discount" value="7">
+          </div>
+          <!-- Row 2 for Option B -->
+          <div>
+            <label for="range2B-start">Range 2 Start Time: </label>
+            <input type="time" id="range2B-start" step="900" value="08:00" disabled>
+            <label for="range2B-end">End Time: </label>
+            <input type="time" id="range2B-end" step="900" value="18:00">
+            <label for="range2B-discount">Discount (%): </label>
+            <input type="number" id="range2B-discount" value="7">
+          </div>
+          <!-- Row 3 for Option B -->
+          <div>
+            <label for="range3B-start">Range 3 Start Time: </label>
+            <input type="time" id="range3B-start" step="900" value="18:00" disabled>
+            <label for="range3B-end">End Time: </label>
+            <input type="time" id="range3B-end" step="900" value="23:45" disabled>
+            <label for="range3B-discount">Discount (%): </label>
+            <input type="number" id="range3B-discount" value="7">
+          </div>
+        </div>
+      </div>
+      <button onclick="updateAnnualChartOverlay()">Apply Discounts</button>
+      <p id="annual-savings"></p>
+    </div>
+    <!-- Annual chart with overlay of original, Option A, and Option B data -->
+    <canvas id="annual-avg-day-chart"></canvas>
+  </div>
+
+  <!-- Button to export the entire webpage to PDF -->
+  <button id="export-pdf-btn" onclick="exportToPDF()">Export to PDF</button>
 </body>
 </html>
