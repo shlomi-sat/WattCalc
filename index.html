@@ -69,9 +69,6 @@
     .metric-selector {
       margin-bottom: 10px;
     }
-    .discount-inputs div {
-      margin-bottom: 10px;
-    }
     /* Styles for annual discount sections */
     .discount-section {
       margin-bottom: 20px;
@@ -90,6 +87,42 @@
       margin-top: 40px;
       padding: 10px 20px;
       font-size: 16px;
+    }
+    /* Ensure canvas elements are responsive */
+    canvas {
+      display: block;
+      max-width: 100% !important;
+      height: auto !important;
+    }
+    /* --- New CSS for Discount Inputs (Mobile Friendly) --- */
+    .discount-inputs div {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    @media (max-width: 600px) {
+      .discount-inputs div {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .discount-inputs label,
+      .discount-inputs input {
+        width: 100%;
+        margin: 2px 0;
+      }
+    }
+    /* ------------------------------------------------------ */
+    /* Mobile adjustments for overall layout */
+    @media (max-width: 600px) {
+      body {
+        margin: 10px;
+      }
+      #calculator-intro {
+        padding: 10px;
+      }
+      table, #preview-table {
+        font-size: 14px;
+      }
     }
   </style>
   <script>
@@ -365,6 +398,11 @@
           });
         }
       }
+      let allMax = 0;
+      datasets.forEach(ds => {
+        const dsMax = Math.max(...ds.data);
+        if (dsMax > allMax) allMax = dsMax;
+      });
       const ctx = document.getElementById("all-months-chart").getContext("2d");
       if (allMonthsChart) allMonthsChart.destroy();
       allMonthsChart = new Chart(ctx, {
@@ -378,7 +416,11 @@
           plugins: { legend: { display: true } },
           scales: {
             x: { title: { display: true, text: "Time" } },
-            y: { title: { display: true, text: "Consumption (kWh)" } }
+            y: { 
+              title: { display: true, text: "Consumption (kWh)" },
+              beginAtZero: true,
+              suggestedMax: allMax * 1.1
+            }
           }
         }
       });
@@ -401,7 +443,6 @@
       let totals = timeSlots.map(slot => annualData[slot]);
       window.globalAnnualData = { timeSlots, totals };
 
-      // Option A calculations (using Option A inputs)
       let r1A_end = document.getElementById("range1A-end").value;
       let d1A = parseFloat(document.getElementById("range1A-discount").value) || 0;
       let r2A_end = document.getElementById("range2A-end").value;
@@ -422,7 +463,6 @@
         }
       });
 
-      // Option B calculations (using Option B inputs)
       let r1B_end = document.getElementById("range1B-end").value;
       let d1B = parseFloat(document.getElementById("range1B-discount").value) || 0;
       let r2B_end = document.getElementById("range2B-end").value;
@@ -443,6 +483,7 @@
         }
       });
 
+      const maxValue = totals.length ? Math.max(...totals) : 0;
       const ctx = document.getElementById("annual-avg-day-chart").getContext("2d");
       if (window.annualChart) window.annualChart.destroy();
       window.annualChart = new Chart(ctx, {
@@ -475,10 +516,16 @@
         },
         options: {
           responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 2,
           plugins: { legend: { display: true } },
           scales: {
             x: { title: { display: true, text: "Time" } },
-            y: { title: { display: true, text: "Consumption (kWh)" } }
+            y: { 
+              title: { display: true, text: "Consumption (kWh)" },
+              beginAtZero: true,
+              suggestedMax: maxValue * 1.1
+            }
           }
         }
       });
@@ -512,7 +559,11 @@
       const file = event.target.files[0];
       const reader = new FileReader();
       reader.onload = function(e) {
-        const lines = e.target.result.split("\n");
+        const lines = e.target.result.split(/\r?\n/);
+        if (!lines[3] || !lines[7]) {
+          alert("The file is not valid or data is missing. Please ensure you have a valid CSV file from a smart electricity meter.");
+          return;
+        }
         const headers = lines[3].split(",");
         const meterInfo = lines[7].split(",");
         const tableBody = document.querySelector("tbody");
@@ -526,7 +577,6 @@
         const monthlyData = {};
         const dailyData = {};
         const avgDayData = {};
-        // Reintroduce the First 10 Rows of Data preview:
         let previewHTML = "";
         let rowCount = 0;
         for (let i = 12; i < lines.length; i++) {
@@ -565,7 +615,6 @@
             avgDayData[monthYear][timeSlot].values.push(consumption);
           }
         }
-        // Populate the preview table's tbody with the first 10 rows.
         document.getElementById("preview-tbody").innerHTML = previewHTML;
         updateSummary(monthlyData, headerInfo);
         globalMonthlyData = monthlyData;
@@ -696,7 +745,7 @@
   <div id="daily-chart-container">
     <h2>Daily Total Consumption</h2>
     <div>
-      <label for="month-selector">Select Month: </label>
+      <label for="month-selector">Select Month:</label>
       <select id="month-selector"></select>
     </div>
     <canvas id="daily-chart"></canvas>
@@ -706,11 +755,11 @@
   <div id="average-day-chart-container">
     <h2>Average Day Consumption</h2>
     <div>
-      <label for="average-day-month-selector">Select Month: </label>
+      <label for="average-day-month-selector">Select Month:</label>
       <select id="average-day-month-selector"></select>
     </div>
     <div class="metric-selector">
-      <label for="avg-day-metric-selector">Select Metric: </label>
+      <label for="avg-day-metric-selector">Select Metric:</label>
       <select id="avg-day-metric-selector">
         <option value="average">Average</option>
         <option value="median">Median</option>
@@ -726,7 +775,7 @@
   <div id="seasonal-avg-chart-container">
     <h2>Average Day Consumption by Season</h2>
     <div class="metric-selector">
-      <label for="seasonal-metric-selector">Select Metric: </label>
+      <label for="seasonal-metric-selector">Select Metric:</label>
       <select id="seasonal-metric-selector">
         <option value="average">Average</option>
         <option value="median">Median</option>
@@ -742,7 +791,7 @@
   <div id="all-months-chart-container">
     <h2>Average Day Consumption for All Months</h2>
     <div class="metric-selector">
-      <label for="all-months-metric-selector">Select Metric: </label>
+      <label for="all-months-metric-selector">Select Metric:</label>
       <select id="all-months-metric-selector">
         <option value="average">Average</option>
         <option value="median">Median</option>
@@ -759,35 +808,35 @@
     <h2>Annual Average Day Consumption</h2>
     <!-- Discount controls and annual savings summary placed above the chart -->
     <div class="discount-section">
-      <!-- Option A: Customizable Discount Scenario (Fixed) -->
+      <!-- Option A: Fixed Discount Scenario -->
       <div class="discount-option option-a">
         <h3>Discount Scenario A (Fixed)</h3>
         <div class="discount-inputs">
-          <!-- Row 1 for Option A -->
+          <!-- Option A Row 1 -->
           <div>
-            <label for="range1A-start">Range 1 Start Time: </label>
+            <label for="range1A-start">Range 1 Start Time:</label>
             <input type="time" id="range1A-start" step="900" value="00:00" disabled>
-            <label for="range1A-end">End Time: </label>
+            <label for="range1A-end">End Time:</label>
             <input type="time" id="range1A-end" step="900" value="18:00">
-            <label for="range1A-discount">Discount (%): </label>
+            <label for="range1A-discount">Discount (%):</label>
             <input type="number" id="range1A-discount" value="0">
           </div>
-          <!-- Row 2 for Option A -->
+          <!-- Option A Row 2 -->
           <div>
-            <label for="range2A-start">Range 2 Start Time: </label>
+            <label for="range2A-start">Range 2 Start Time:</label>
             <input type="time" id="range2A-start" step="900" value="18:00" disabled>
-            <label for="range2A-end">End Time: </label>
+            <label for="range2A-end">End Time:</label>
             <input type="time" id="range2A-end" step="900" value="22:00">
-            <label for="range2A-discount">Discount (%): </label>
+            <label for="range2A-discount">Discount (%):</label>
             <input type="number" id="range2A-discount" value="25">
           </div>
-          <!-- Row 3 for Option A -->
+          <!-- Option A Row 3 -->
           <div>
-            <label for="range3A-start">Range 3 Start Time: </label>
+            <label for="range3A-start">Range 3 Start Time:</label>
             <input type="time" id="range3A-start" step="900" value="22:00" disabled>
-            <label for="range3A-end">End Time: </label>
+            <label for="range3A-end">End Time:</label>
             <input type="time" id="range3A-end" step="900" value="23:45" disabled>
-            <label for="range3A-discount">Discount (%): </label>
+            <label for="range3A-discount">Discount (%):</label>
             <input type="number" id="range3A-discount" value="0">
           </div>
         </div>
@@ -796,31 +845,31 @@
       <div class="discount-option option-b">
         <h3>Discount Scenario B (Customizable)</h3>
         <div class="discount-inputs">
-          <!-- Row 1 for Option B -->
+          <!-- Option B Row 1 -->
           <div>
-            <label for="range1B-start">Range 1 Start Time: </label>
+            <label for="range1B-start">Range 1 Start Time:</label>
             <input type="time" id="range1B-start" step="900" value="00:00" disabled>
-            <label for="range1B-end">End Time: </label>
+            <label for="range1B-end">End Time:</label>
             <input type="time" id="range1B-end" step="900" value="08:00">
-            <label for="range1B-discount">Discount (%): </label>
+            <label for="range1B-discount">Discount (%):</label>
             <input type="number" id="range1B-discount" value="7">
           </div>
-          <!-- Row 2 for Option B -->
+          <!-- Option B Row 2 -->
           <div>
-            <label for="range2B-start">Range 2 Start Time: </label>
+            <label for="range2B-start">Range 2 Start Time:</label>
             <input type="time" id="range2B-start" step="900" value="08:00" disabled>
-            <label for="range2B-end">End Time: </label>
+            <label for="range2B-end">End Time:</label>
             <input type="time" id="range2B-end" step="900" value="18:00">
-            <label for="range2B-discount">Discount (%): </label>
+            <label for="range2B-discount">Discount (%):</label>
             <input type="number" id="range2B-discount" value="7">
           </div>
-          <!-- Row 3 for Option B -->
+          <!-- Option B Row 3 -->
           <div>
-            <label for="range3B-start">Range 3 Start Time: </label>
+            <label for="range3B-start">Range 3 Start Time:</label>
             <input type="time" id="range3B-start" step="900" value="18:00" disabled>
-            <label for="range3B-end">End Time: </label>
+            <label for="range3B-end">End Time:</label>
             <input type="time" id="range3B-end" step="900" value="23:45" disabled>
-            <label for="range3B-discount">Discount (%): </label>
+            <label for="range3B-discount">Discount (%):</label>
             <input type="number" id="range3B-discount" value="7">
           </div>
         </div>
@@ -832,7 +881,7 @@
     <canvas id="annual-avg-day-chart"></canvas>
   </div>
 
-  <!-- Button to export the entire webpage to PDF -->
+  <!-- Button to export the entire webpage to PDF (landscape) -->
   <button id="export-pdf-btn" onclick="exportToPDF()">Export to PDF</button>
 </body>
 </html>
